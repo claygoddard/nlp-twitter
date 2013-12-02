@@ -19,11 +19,24 @@ class TweetStats():
         self.total_bigram_counts = defaultdict(int)
         self.starting_word_counts = defaultdict(int)
         self.total_starting_word_counts = 0
-        statuses_processed = [twokenize.tokenize(s.text.lower()) for s in statuses]
+        statuses_processed = self.process_statuses(statuses)
         self.process_total_words(statuses_processed)
         self.process_word_counts(statuses_processed)
         self.process_bigram_counts(statuses_processed)
         self.process_starting_word_counts(statuses_processed)
+        
+    def process_statuses(self, statuses):
+        statuses = [twokenize.tokenize(s.text.lower()) for s in statuses]
+        for s in xrange(len(statuses)):
+            w = 1
+            while True:
+                if w >= len(statuses[s]):
+                    break
+                if statuses[s][w][0] == "'":
+                    statuses[s] = statuses[s][:w-1] + [statuses[s][w-1] + statuses[s][w]] + statuses[s][w+1:]
+                    w = 0
+                w += 1
+        return statuses
         
     def process_total_words(self, statuses):
         self.total_words = 0
@@ -48,10 +61,12 @@ class TweetStats():
             self.total_starting_word_counts += 1
             
     def log_prob_word(self, word):
-        return math.log(self.word_counts[word] + self.alpha * self.total_word_counts) - math.log(self.total_word_counts + self.alpha)
+        return math.log(self.word_counts[word] + self.alpha * self.total_word_counts) - math.log(self.total_word_counts)
     
     def log_prob_bigram(self, first_word, second_word):
-        return math.log(self.bigram_counts[first_word][second_word] + self.alpha * self.total_bigram_counts[first_word]) - math.log(self.total_bigram_counts[first_word] + self.alpha)
+        if self.total_bigram_counts[first_word] == 0:
+            return math.log(self.alpha)
+        return math.log(self.bigram_counts[first_word][second_word] + self.alpha * self.total_bigram_counts[first_word]) - math.log(self.total_bigram_counts[first_word])
     
     def log_prob_starting_word(self, word):
         return math.log(self.starting_word_counts[word] + self.alpha * self.total_starting_word_counts) - math.log(self.total_starting_word_counts)
@@ -86,6 +101,21 @@ def best_starting_word(user_stats, hashtag_stats):
     best_word = None
     for word in hashtag_stats.starting_word_counts.keys():
         prob = user_stats.log_prob_starting_word(word) + hashtag_stats.log_prob_starting_word(word)
+        if best_prob is None or prob > best_prob:
+            best_prob = prob
+            best_word = word
+    return best_word
+
+def best_next_word(current_word, used_words, user_stats, hashtag_stats):
+    best_prob = None
+    best_word = None
+    for word in hashtag_stats.bigram_counts[current_word].keys():
+        if word in used_words:
+            continue
+        prob = user_stats.log_prob_bigram(current_word, word) + \
+                hashtag_stats.log_prob_bigram(current_word, word) + \
+                user_stats.log_prob_word(word) + \
+                hashtag_stats.log_prob_word(word)
         if best_prob is None or prob > best_prob:
             best_prob = prob
             best_word = word
@@ -149,7 +179,12 @@ def run():
     out.write(user_stats.__str__())
     out.write("\n\n\n")
     out.write(hashtag_stats.__str__())"""
-    print best_starting_word(user_stats, hashtag_stats)
+    cur = best_starting_word(user_stats, hashtag_stats)
+    used_words = [cur]
+    for i in xrange(10):
+        cur = best_next_word(cur, used_words, user_stats, hashtag_stats)
+        used_words.append(cur)
+    print " ".join(used_words)
     
     
 if __name__ == "__main__":
