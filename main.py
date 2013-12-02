@@ -4,6 +4,9 @@ from collections import defaultdict
 import twokenize
 import operator
 import keys
+import codecs
+import sys
+import shelve
 
 class TweetStats():
     def __init__(self, statuses):
@@ -40,6 +43,7 @@ class TweetStats():
         ret_s += "top 30 bigram counts:\n"
         ret_s += "\n".join([item[0] + " : " + str(item[1]) for item in self.sorted_bigram_counts()[:30]]) + "\n"
         ret_s += "===END===\n"
+        ret_s.encode('utf-8')
         return ret_s
         
 
@@ -56,15 +60,43 @@ def run():
     
     if hashtag[0] != "#":
         hashtag = "#" + hashtag
+        
+    user_statuses_shelve = shelve.open('user_statuses')
+    hashtag_statuses_shelve = shelve.open('hashtag_statuses')
     
-    user = api.GetUser(screen_name=username)
-    user_statuses = api.GetUserTimeline(user_id=user.id, count=3200, include_rts=False)
-    #hashtag_statuses = api.GetSearch(term=hashtag, count=3200)
+    print user_statuses_shelve.keys()
+    
+    user_statuses_shelve_data = user_statuses_shelve.get('data', None)
+    hashtag_statuses_shelve_data = hashtag_statuses_shelve.get('data', None)
+    
+    user_statuses = user_statuses_shelve_data
+    if user_statuses is None:
+        print "Grabbing user statuses"
+        user = api.GetUser(screen_name=username)
+        user_statuses = api.GetUserTimeline(user_id=user.id, count=200, include_rts=False)
+        user_statuses_shelve['data'] = user_statuses
+    
+    hashtag_statuses = hashtag_statuses_shelve_data
+    if hashtag_statuses is None:
+        print "Grabbing hashtag statuses"
+        hashtag_statuses = api.GetSearch(term=hashtag, count=100)
+        min_id = min([item.id for item in hashtag_statuses])
+        for i in xrange(5):
+            more = api.GetSearch(term=hashtag, count=100, max_id=min_id)
+            min_id = min([item.id for item in more])
+            hashtag_statuses.extend(more)
+        hashtag_statuses_shelve['data'] = hashtag_statuses
+    
+    user_statuses_shelve.close()
+    hashtag_statuses_shelve.close()
     
     user_stats = TweetStats(user_statuses)
-    #hashtag_stats = TweetStats(hashtag_statuses)
+    hashtag_stats = TweetStats(hashtag_statuses)
     
-    print user_stats
+    out = codecs.getwriter('utf-8')(sys.stdout)
+    out.write(user_stats.__str__())
+    out.write("\n\n\n")
+    out.write(hashtag_stats.__str__())
     
     
 if __name__ == "__main__":
